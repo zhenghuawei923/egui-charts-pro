@@ -142,7 +142,7 @@ pub fn render_crosshair_full(
     let price = price_scale.min_price + price_ratio as f64 * price_scale.price_range();
 
     // Price label on Y-axis with "+" alert indicator
-    let price_label = format!("{price:.8}");
+    let price_label = format!("{price:.3}");
     let price_pos = Pos2::new(
         context.rect.max.x + DESIGN_TOKENS.sizing.crosshair.label_offset_x,
         actual_pos.y,
