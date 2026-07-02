@@ -978,7 +978,7 @@
             indicator_pane_default: 120.0,
             volume_bubbles_max_diameter: 40.0,
             heatmap_strip_height: 24.0,
-            order_line_label_width: 120.0,
+            order_line_label_width: 140.0,
             order_line_label_height: 20.0,
             time_label_min_spacing: 60.0,
             time_label_max_spacing: 140.0,

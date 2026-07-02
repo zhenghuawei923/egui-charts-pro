@@ -95,6 +95,11 @@ pub struct OrderLine {
     pub is_active: bool,
     /// Whether this order is selected/highlighted
     pub is_selected: bool,
+    // Claude Opus 4.8 AI，新增于 2026 年 07 月 02 日。逻辑：
+    // 允许调用方按订单状态覆盖默认色（线色、标签背景色、标签文字色），
+    // None 时沿用原 get_order_colors 逻辑（bullish/bearish by side）
+    /// 自定义颜色覆盖 (线色, 标签背景色, 标签文字色)；None 表示使用默认色
+    pub custom_color: Option<(Color32, Color32, Color32)>,
 }
 
 impl OrderLine {
@@ -115,6 +120,7 @@ impl OrderLine {
             quantity,
             is_active: true,
             is_selected: false,
+            custom_color: None,
         }
     }
 
@@ -135,6 +141,7 @@ impl OrderLine {
             quantity,
             is_active: true,
             is_selected: false,
+            custom_color: None,
         }
     }
 
@@ -156,6 +163,7 @@ impl OrderLine {
             quantity,
             is_active: true,
             is_selected: false,
+            custom_color: None,
         }
     }
 
@@ -176,6 +184,7 @@ impl OrderLine {
             quantity,
             is_active: true,
             is_selected: false,
+            custom_color: None,
         }
     }
 
@@ -188,6 +197,17 @@ impl OrderLine {
     /// Set active state
     pub fn with_active(mut self, active: bool) -> Self {
         self.is_active = active;
+        self
+    }
+
+    // Claude Opus 4.8 AI，新增于 2026 年 07 月 02 日。逻辑：
+    // 链式调用覆盖默认色，用于按订单状态（撤单灰、提交中黄、成交红等）着色
+    /// 覆盖线色、标签背景色和标签文字色（链式调用）
+    /// line_color:  横线颜色
+    /// bg_color:    标签背景色
+    /// text_color:  标签文字色
+    pub fn with_color(mut self, line_color: Color32, bg_color: Color32, text_color: Color32) -> Self {
+        self.custom_color = Some((line_color, bg_color, text_color));
         self
     }
 }
@@ -369,11 +389,8 @@ fn render_order_line(ui: &mut Ui, chart_rect: Rect, y: f32, line: &OrderLine) ->
     }
 
     // Label text
-    let label_text_display = if line.label.len() > 18 {
-        format!("{}...", &line.label[..15])
-    } else {
-        line.label.clone()
-    };
+    // Opus 4.8 AI，修改于2026年07月02日。逻辑：移除截断逻辑，完整显示标签内容
+    let label_text_display = line.label.clone();
 
     painter.text(
         label_rect.center(),
@@ -427,7 +444,15 @@ fn render_order_line(ui: &mut Ui, chart_rect: Rect, y: f32, line: &OrderLine) ->
 }
 
 /// Get colors for order line based on type and side
+// Claude Opus 4.8 AI，更新于 2026 年 07 月 02 日。逻辑：
+// 优先使用 custom_color 覆盖，供调用方按订单状态（撤单/成交/拒绝等）自定义着色，
+// 未设置则沿用原来按 line_type + side 决定的默认颜色
 fn get_order_colors(ui: &Ui, line: &OrderLine) -> (Color32, Color32, Color32) {
+    // 自定义色优先
+    if let Some(custom) = line.custom_color {
+        return custom;
+    }
+
     let bullish = ui.bullish_color();
     let bearish = ui.bearish_color();
 
