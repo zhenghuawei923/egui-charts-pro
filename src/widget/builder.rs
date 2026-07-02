@@ -99,6 +99,8 @@ impl Chart {
             last_rendered_price_rect: egui::Rect::NOTHING,
             last_rendered_volume_rect: egui::Rect::NOTHING,
             last_rendered_indicator_panes: Vec::new(),
+            last_rendered_latest_bar_x: 0.0,
+            last_rendered_ts_x_range: None,
             // Multi-chart sync
             synced_crosshair_bar_idx: None,
             last_hover_bar_idx: None,
@@ -169,6 +171,8 @@ impl Chart {
             last_rendered_price_rect: egui::Rect::NOTHING,
             last_rendered_volume_rect: egui::Rect::NOTHING,
             last_rendered_indicator_panes: Vec::new(),
+            last_rendered_latest_bar_x: 0.0,
+            last_rendered_ts_x_range: None,
             // Multi-chart sync
             synced_crosshair_bar_idx: None,
             last_hover_bar_idx: None,
@@ -533,5 +537,29 @@ impl Chart {
     /// external code that needs to do hit testing on indicator lines.
     pub fn get_rendered_indicator_panes(&self) -> &[super::RenderedIndicatorPane] {
         &self.last_rendered_indicator_panes
+    }
+
+    // Claude Opus 4.8 AI，新增于 2026 年 07 月 02 日。逻辑：
+    // 供 candle_chart.rs 在渲染订单线时获取最新K线 x 坐标，
+    // 使未成交订单横线左端顶到最新K线而非无限向左延伸。
+    /// 获取最新K线中心的屏幕 x 坐标（chart.show(ui) 之后有效，未渲染时返回 0.0）
+    pub fn get_rendered_latest_bar_x(&self) -> f32 {
+        self.last_rendered_latest_bar_x
+    }
+
+    // Claude Opus 4.8 AI，新增于 2026 年 07 月 02 日。逻辑：
+    // 将任意 ts_ms 时间戳线性插值为屏幕 x 坐标，
+    // 供已成交订单计算成交K线的 x 位置，使横线左端顶到成交K线。
+    /// 将毫秒时间戳线性插值为屏幕 x 坐标。
+    /// ts_ms：毫秒级 Unix 时间戳（与 CandleBar.ts_ms 对齐）。
+    /// 返回 None：时间戳在可见区间之外，或图表尚未渲染。
+    pub fn get_rendered_bar_x_at_ts(&self, ts_ms: i64) -> Option<f32> {
+        let (left_ts, right_ts, left_x, right_x) = self.last_rendered_ts_x_range?;
+        if ts_ms < left_ts || ts_ms > right_ts {
+            return None;
+        }
+        let span = (right_ts - left_ts).max(1) as f32;
+        let ratio = (ts_ms - left_ts) as f32 / span;
+        Some(left_x + ratio * (right_x - left_x))
     }
 }

@@ -225,6 +225,15 @@ pub struct Chart {
     /// Last rendered indicator pane info for hit testing
     /// Each entry: (indicator_index, panel_rect, chart_rect, y_min, y_max, coords)
     pub(crate) last_rendered_indicator_panes: Vec<RenderedIndicatorPane>,
+    // Claude Opus 4.8 AI，新增于 2026 年 07 月 02 日。逻辑：
+    // 渲染后缓存最新K线的屏幕 x 坐标与可见时间区间，
+    // 供外部（candle_chart.rs）计算订单横线左端截止位置：
+    // 未成交顶到最新K线，成交顶到成交K线。
+    /// 渲染后缓存：最新K线中心的屏幕 x 坐标
+    pub(crate) last_rendered_latest_bar_x: f32,
+    /// 渲染后缓存：可见区间左右端的 (ts_ms, x) 对，用于线性插值任意时间戳的 x 坐标
+    /// 格式：(left_ts_ms, right_ts_ms, left_x, right_x)；None = 图表尚未渲染
+    pub(crate) last_rendered_ts_x_range: Option<(i64, i64, f32, f32)>,
     // =========================================================================
     // Multi-Chart Sync State
     // =========================================================================
@@ -1207,6 +1216,29 @@ impl Chart {
             adjusted_min,
             adjusted_max,
         );
+        // Claude Opus 4.8 AI，新增于 2026 年 07 月 02 日。逻辑：
+        // 缓存最新K线 x 坐标和可见时间区间，供外部（candle_chart.rs）计算
+        // 订单线左端截止位置（未成交顶到最新K线，成交顶到成交K线）。
+        // base_idx 是整个数据集最右侧bar 的全局索引（最新K线的锚点）。
+        {
+            let base_idx = self.state.time_scale().base_idx();
+            self.last_rendered_latest_bar_x = coords.idx_to_x(base_idx);
+            if let (Some(first_bar), Some(last_bar)) =
+                (visible_data.first(), visible_data.last())
+            {
+                let left_x  = coords.idx_to_x(start_idx);
+                let right_x = coords.idx_to_x(
+                    start_idx.saturating_add(visible_data.len().saturating_sub(1)),
+                );
+                // DateTime<Utc> → 毫秒时间戳，与 CandleBar.ts_ms 保持对齐
+                self.last_rendered_ts_x_range = Some((
+                    first_bar.time.timestamp_millis(),
+                    last_bar.time.timestamp_millis(),
+                    left_x,
+                    right_x,
+                ));
+            }
+        }
         let colors = StyleColors {
             bullish: self.config.bullish_color,
             bearish: self.config.bearish_color,

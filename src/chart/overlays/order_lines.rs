@@ -47,30 +47,33 @@ impl OrderSide {
     }
 }
 
-/// Categorization of an order line, determining its visual style and label.
+/// 订单线类型，决定视觉样式与标签文字
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OrderLineType {
-    /// Entry order (limit or market)
+    /// 入场单（限价或市价）
     Entry,
-    /// Stop loss order
+    /// 止损单
     StopLoss,
-    /// Take profit order (with optional partial percentage)
+    /// 止盈单（可含部分成交百分比）
     TakeProfit { partial_pct: Option<f64> },
-    /// Pending limit order
+    /// 普通挂单（BID/ASK 限价单）
     PendingLimit,
-    /// Pending stop order
+    /// 条件市价单（MIT：触价后以市价成交）
     PendingStop,
+    /// 条件限价单（LIT：触价后以限价挂单）
+    PendingStopLimit,
 }
 
 impl OrderLineType {
-    /// Get short label for the line type
+    /// 获取订单类型的中文简称，与下单按钮文字保持一致
     pub fn short_label(&self) -> &'static str {
         match self {
-            OrderLineType::Entry => "ENT",
-            OrderLineType::StopLoss => "SL",
-            OrderLineType::TakeProfit { .. } => "TP",
-            OrderLineType::PendingLimit => "LMT",
-            OrderLineType::PendingStop => "STP",
+            OrderLineType::Entry           => "入场",
+            OrderLineType::StopLoss        => "止损",
+            OrderLineType::TakeProfit { .. }=> "止盈",
+            OrderLineType::PendingLimit    => "限价",
+            OrderLineType::PendingStop     => "触市",   // MIT：触价市价
+            OrderLineType::PendingStopLimit=> "触限",   // LIT：触价限价
         }
     }
 }
@@ -100,6 +103,12 @@ pub struct OrderLine {
     // None 时沿用原 get_order_colors 逻辑（bullish/bearish by side）
     /// 自定义颜色覆盖 (线色, 标签背景色, 标签文字色)；None 表示使用默认色
     pub custom_color: Option<(Color32, Color32, Color32)>,
+    // Claude Opus 4.8 AI，新增于 2026 年 07 月 02 日。逻辑：
+    // 横线不应一直向左延伸至图表边界——未成交时顶到最新K线，成交时顶到成交K线。
+    // 由调用方（candle_chart.rs）在构建 OrderLine 时填入对应K线的屏幕 x 坐标；
+    // None 时退回原有行为（从图表左边界起画），保持向后兼容。
+    /// 横线左端起始 x 坐标（像素）；None = 从图表左边界画（原行为）
+    pub line_left_x: Option<f32>,
 }
 
 impl OrderLine {
@@ -121,6 +130,7 @@ impl OrderLine {
             is_active: true,
             is_selected: false,
             custom_color: None,
+            line_left_x: None,
         }
     }
 
@@ -142,6 +152,7 @@ impl OrderLine {
             is_active: true,
             is_selected: false,
             custom_color: None,
+            line_left_x: None,
         }
     }
 
@@ -164,10 +175,11 @@ impl OrderLine {
             is_active: true,
             is_selected: false,
             custom_color: None,
+            line_left_x: None,
         }
     }
 
-    /// Create a pending limit order line
+    /// 创建挂单（限价）横线，用于普通限价单（BID/ASK）
     pub fn pending_limit(
         order_id: impl Into<String>,
         price: f64,
@@ -185,6 +197,51 @@ impl OrderLine {
             is_active: true,
             is_selected: false,
             custom_color: None,
+            line_left_x: None,
+        }
+    }
+
+    /// 创建 MIT 条件市价横线（触价后以市价成交）
+    pub fn pending_stop(
+        order_id: impl Into<String>,
+        price: f64,
+        side: OrderSide,
+        quantity: f64,
+        label: impl Into<String>,
+    ) -> Self {
+        Self {
+            order_id: OrderId::new(order_id),
+            price,
+            line_type: OrderLineType::PendingStop,
+            label: label.into(),
+            side,
+            quantity,
+            is_active: true,
+            is_selected: false,
+            custom_color: None,
+            line_left_x: None,
+        }
+    }
+
+    /// 创建 LIT 条件限价横线（触价后以限价挂单）
+    pub fn pending_stop_limit(
+        order_id: impl Into<String>,
+        price: f64,
+        side: OrderSide,
+        quantity: f64,
+        label: impl Into<String>,
+    ) -> Self {
+        Self {
+            order_id: OrderId::new(order_id),
+            price,
+            line_type: OrderLineType::PendingStopLimit,
+            label: label.into(),
+            side,
+            quantity,
+            is_active: true,
+            is_selected: false,
+            custom_color: None,
+            line_left_x: None,
         }
     }
 
@@ -208,6 +265,16 @@ impl OrderLine {
     /// text_color:  标签文字色
     pub fn with_color(mut self, line_color: Color32, bg_color: Color32, text_color: Color32) -> Self {
         self.custom_color = Some((line_color, bg_color, text_color));
+        self
+    }
+
+    // Claude Opus 4.8 AI，新增于 2026 年 07 月 02 日。逻辑：
+    // 控制横线左端截止位置：未成交顶到最新K线，成交顶到成交K线，
+    // 避免横线无限向左延伸导致视觉噪音。
+    /// 设置横线左端起始 x 坐标（像素），链式调用
+    /// left_x：横线起始的屏幕 x 坐标
+    pub fn with_left_x(mut self, left_x: f32) -> Self {
+        self.line_left_x = Some(left_x);
         self
     }
 }
@@ -326,20 +393,22 @@ fn render_order_line(ui: &mut Ui, chart_rect: Rect, y: f32, line: &OrderLine) ->
     );
 
     let cancel_size = DESIGN_TOKENS.sizing.icon_sm;
-    let cancel_rect = Rect::from_min_size(
+    // 类型标签放在标签框右侧，与标签框等高
+    let type_label_w = DESIGN_TOKENS.sizing.button_md;
+    let type_rect = Rect::from_min_size(
         Pos2::new(
             label_rect.right() + DESIGN_TOKENS.spacing.xs,
+            y - label_height / 2.0,
+        ),
+        Vec2::new(type_label_w, label_height),
+    );
+    // 撤单按钮在类型标签右侧
+    let cancel_rect = Rect::from_min_size(
+        Pos2::new(
+            type_rect.right() + DESIGN_TOKENS.spacing.xs,
             y - cancel_size / 2.0,
         ),
         Vec2::splat(cancel_size),
-    );
-
-    let type_rect = Rect::from_min_size(
-        Pos2::new(
-            chart_rect.left() + DESIGN_TOKENS.spacing.sm,
-            y - DESIGN_TOKENS.spacing.lg,
-        ),
-        Vec2::new(DESIGN_TOKENS.sizing.button_md, DESIGN_TOKENS.sizing.icon_sm),
     );
 
     // Allocate interactive areas first (requires mutable borrow)
@@ -361,10 +430,14 @@ fn render_order_line(ui: &mut Ui, chart_rect: Rect, y: f32, line: &OrderLine) ->
     // Now do all the painting (only immutable borrow needed)
     let painter = ui.painter();
 
-    // Draw dashed line across chart
+    // Claude Opus 4.8 AI，修改于 2026 年 07 月 02 日。逻辑：
+    // 横线不再无限向左延伸：未成交时左端顶到最新K线，成交时顶到成交K线。
+    // line_left_x 由调用方（candle_chart.rs）传入对应K线的屏幕 x 坐标；
+    // None 时退回原行为（从图表左边界起画），保持向后兼容。
+    // Draw dashed line across chart，从 line_left_x（或图表左边界）起
     let dash_length = 6.0;
     let gap_length = 4.0;
-    let mut x = chart_rect.left();
+    let mut x = line.line_left_x.unwrap_or(chart_rect.left());
 
     while x < chart_rect.right() - 100.0 {
         let segment_end = (x + dash_length).min(chart_rect.right() - 100.0);
@@ -429,7 +502,7 @@ fn render_order_line(ui: &mut Ui, chart_rect: Rect, y: f32, line: &OrderLine) ->
         );
     }
 
-    // Type indicator on the left side of line
+    // 交易类型标签：放在标签框右侧，与按钮中文保持一致（限价/触价/止损/止盈/入场）
     let type_label = line.line_type.short_label();
     painter.rect_filled(type_rect, CornerRadius::same(2), label_bg);
     painter.text(
@@ -457,7 +530,10 @@ fn get_order_colors(ui: &Ui, line: &OrderLine) -> (Color32, Color32, Color32) {
     let bearish = ui.bearish_color();
 
     match line.line_type {
-        OrderLineType::Entry | OrderLineType::PendingLimit | OrderLineType::PendingStop => {
+        OrderLineType::Entry
+        | OrderLineType::PendingLimit
+        | OrderLineType::PendingStop
+        | OrderLineType::PendingStopLimit => {
             // Entry orders use side color
             let base = match line.side {
                 OrderSide::Buy => bullish,

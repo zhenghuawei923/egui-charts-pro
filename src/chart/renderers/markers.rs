@@ -2,7 +2,7 @@ use super::context::{ChartMapping, LinearPriceMap, RenderContext};
 /// Marker renderer for chart annotations
 use crate::model::{Bar, Marker, MarkerPos, MarkerShape};
 use crate::tokens::DESIGN_TOKENS;
-use egui::{Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, Vec2, epaint::StrokeKind};
+use egui::{Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Shape, Stroke, Vec2, epaint::StrokeKind};
 
 /// Render markers on the chart
 pub fn render_markers(
@@ -58,16 +58,37 @@ pub fn render_markers(
                 marker.size,
             );
 
-            // Render text label if present
+            // 文字渲染：TextBadge = 圆角矩形徽章（文字居中内嵌）；其他形状 = 文字显示在形状下方
             if let Some(text) = &marker.text {
-                let text_pos = Pos2::new(pos.x, pos.y + 12.0 * marker.size);
-                context.painter.text(
-                    text_pos,
-                    egui::Align2::CENTER_TOP,
-                    text,
-                    FontId::proportional(10.0 * marker.size),
-                    marker.color,
-                );
+                if marker.shape == MarkerShape::TextBadge {
+                    // Claude Opus 4.8 AI，新增于 2026 年 07 月 02 日。逻辑：
+                    // TextBadge 需要背景色衬托文字（如买入红底白字 B，卖出绿底白字 S），
+                    // 显示内容为单字符"B"/"S"，使用固定尺寸避免需要 &mut Fonts 引用
+                    let font  = FontId::proportional(11.0 * marker.size);
+                    let w     = 16.0 * marker.size;   // 固定宽度：单字符徽章足够
+                    let h     = 14.0 * marker.size;
+                    let badge = Rect::from_center_size(pos, Vec2::new(w, h));
+                    // 填充背景色（由 marker.color 控制）
+                    context.painter.rect_filled(badge, CornerRadius::same(3), marker.color);
+                    // 居中绘制白色文字
+                    context.painter.text(
+                        pos,
+                        Align2::CENTER_CENTER,
+                        text,
+                        font,
+                        Color32::WHITE,
+                    );
+                } else {
+                    // 其他形状：文字显示在形状正下方
+                    let text_pos = Pos2::new(pos.x, pos.y + 12.0 * marker.size);
+                    context.painter.text(
+                        text_pos,
+                        Align2::CENTER_TOP,
+                        text,
+                        FontId::proportional(10.0 * marker.size),
+                        marker.color,
+                    );
+                }
             }
 
             // TODO: Add tooltip on hover (requires hover detection in chart widget)
@@ -243,5 +264,7 @@ fn render_marker_shape(
                 ),
             ));
         }
+        // TextBadge：圆角矩形徽章由 render_markers 统一绘制（含文字居中），此处不作处理
+        MarkerShape::TextBadge => {}
     }
 }

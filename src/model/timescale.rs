@@ -83,7 +83,7 @@ impl TimeScale {
     pub fn new() -> Self {
         Self {
             bar_spacing: 8.0,
-            right_offset: 5.0, // Default: 5 bars of whitespace on the right
+            right_offset: 10.0, // 默认右侧留出10根K线的空间
             width: 800.0,
             bar_cnt: 0,
             min_bar_spacing: 0.5,
@@ -184,9 +184,9 @@ impl TimeScale {
     }
 
     /// Jump to latest bar position
-    /// Resets right_offset to the default sticky offset (2.5 bars)
+    /// 右侧保留10根K线的空间，与 scroll_to_realtime 保持一致
     pub fn jump_to_latest(&mut self) {
-        const DEFAULT_RIGHT_OFFSET: f32 = 2.5;
+        const DEFAULT_RIGHT_OFFSET: f32 = 10.0;
         self.right_offset = DEFAULT_RIGHT_OFFSET;
     }
 
@@ -333,10 +333,9 @@ impl TimeScale {
     }
 
     /// Scroll to real-time (latest data)
-    /// Maintains sticky offset - keeps ~2.5 bars of whitespace on the right
-    /// for price labels and visual breathing room
+    /// 右侧保留10根K线的空间，避免最新K线紧贴Y轴
     pub fn scroll_to_realtime(&mut self) {
-        const REALTIME_OFFSET: f32 = 2.5;
+        const REALTIME_OFFSET: f32 = 10.0;
         self.right_offset = REALTIME_OFFSET;
     }
 

@@ -31,6 +31,9 @@ pub enum MarkerShape {
     Cross,
     /// Flag marker - for marking important events
     Flag,
+    /// 文字徽章：带背景色的圆角矩形，文字居中显示
+    /// 用于在K线上方标注买入/卖出成交信号（B=红底白字，S=绿底白字）
+    TextBadge,
 }
 
 /// Marker position relative to the data point
