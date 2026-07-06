@@ -2,6 +2,7 @@ use super::context::{ChartMapping, LinearPriceMap, RenderContext};
 use crate::config::{TooltipMode, TooltipOptions};
 use crate::model::Bar;
 use crate::styles::typography;
+use chrono::Timelike;
 /// Tooltip Renderers
 ///
 /// Provides three tooltip variants:
@@ -179,7 +180,17 @@ pub fn render_tracking_tooltip(
     let mut parts = Vec::new();
 
     if options.show_time {
-        parts.push(candle.time.format("%H:%M:%S").to_string());
+        // 日K/周K 的时间戳恰好是零时（00:00:00），单纯显示时间会看到全是 00:00:00；
+        // 检测到零时则切换为日期格式，否则只显示时分（分钟精度在分时/小时级别已足够）
+        let time_str = if candle.time.hour() == 0
+            && candle.time.minute() == 0
+            && candle.time.second() == 0
+        {
+            candle.time.format("%Y-%m-%d").to_string()
+        } else {
+            candle.time.format("%H:%M").to_string()
+        };
+        parts.push(time_str);
     }
 
     if options.show_ohlc {
