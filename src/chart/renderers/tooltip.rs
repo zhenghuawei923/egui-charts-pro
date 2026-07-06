@@ -2,7 +2,6 @@ use super::context::{ChartMapping, LinearPriceMap, RenderContext};
 use crate::config::{TooltipMode, TooltipOptions};
 use crate::model::Bar;
 use crate::styles::typography;
-use chrono::Timelike;
 /// Tooltip Renderers
 ///
 /// Provides three tooltip variants:
@@ -162,7 +161,8 @@ pub fn render_floating_tooltip(
 }
 
 /// Renders tracking tooltip as horizontal bar at top of chart
-/// Shows: O: xxx  H: xxx  L: xxx  C: xxx  Vol: xxx  (+x.xx%)
+/// Shows: yy-MM-dd HH:mm  O xxx  H xxx  L xxx  C xxx  Vol xxx  (+x.xx%)
+/// 标题字母（O/H/L/C/Vol）保持原色；数值和涨跌幅根据涨跌着色（涨红跌绿）
 pub fn render_tracking_tooltip(
     painter: &Painter,
     chart_rect: Rect,
@@ -172,38 +172,68 @@ pub fn render_tracking_tooltip(
     let bar_height = options.tracking_bar_height;
     let bar_rect = Rect::from_min_size(chart_rect.min, Vec2::new(chart_rect.width(), bar_height));
 
-    // Draw bar background
+    // 绘制横条背景
     painter.rect_filled(bar_rect, 0.0, options.tracking_bar_background);
 
-    // Build tracking text
-    let precision = options.price_precision.min(4); // Use shorter precision for tracking bar
-    let mut parts = Vec::new();
+    let font_id = FontId::proportional(options.font_size);
+    let text_y = bar_rect.center().y;
+    // 当前 x 光标，每次渲染后右移
+    let mut x = bar_rect.min.x + 10.0;
 
+    // 涨跌颜色：收盘≥开盘为涨（红），否则为跌（绿）
+    let is_bullish = candle.close >= candle.open;
+    let val_color = if is_bullish {
+        options.border_color_bullish
+    } else {
+        options.border_color_bearish
+    };
+
+    // 渲染一段文字，返回文字矩形的右边界 x
+    macro_rules! draw_seg {
+        ($text:expr, $color:expr) => {{
+            painter
+                .text(
+                    Pos2::new(x, text_y),
+                    egui::Align2::LEFT_CENTER,
+                    $text,
+                    font_id.clone(),
+                    $color,
+                )
+                .max
+                .x
+        }};
+    }
+
+    // 时间日期：统一格式 yy-MM-dd HH:mm（始终包含日期）
     if options.show_time {
-        // 日K/周K 的时间戳恰好是零时（00:00:00），单纯显示时间会看到全是 00:00:00；
-        // 检测到零时则切换为日期格式，否则只显示时分（分钟精度在分时/小时级别已足够）
-        let time_str = if candle.time.hour() == 0
-            && candle.time.minute() == 0
-            && candle.time.second() == 0
-        {
-            candle.time.format("%Y-%m-%d").to_string()
-        } else {
-            candle.time.format("%H:%M").to_string()
-        };
-        parts.push(time_str);
+        let time_str = candle.time.format("%y-%m-%d %H:%M").to_string();
+        x = draw_seg!(&time_str, options.text_color) + 12.0;
     }
 
+    // OHLC：标题用原色，数值用涨跌色
     if options.show_ohlc {
-        parts.push(format!("O: {:.precision$}", candle.open));
-        parts.push(format!("H: {:.precision$}", candle.high));
-        parts.push(format!("L: {:.precision$}", candle.low));
-        parts.push(format!("C: {:.precision$}", candle.close));
+        let precision = options.price_precision.min(4);
+
+        x = draw_seg!("O ", options.text_color);
+        x = draw_seg!(&format!("{:.precision$}", candle.open), val_color) + 10.0;
+
+        x = draw_seg!("H ", options.text_color);
+        x = draw_seg!(&format!("{:.precision$}", candle.high), val_color) + 10.0;
+
+        x = draw_seg!("L ", options.text_color);
+        x = draw_seg!(&format!("{:.precision$}", candle.low), val_color) + 10.0;
+
+        x = draw_seg!("C ", options.text_color);
+        x = draw_seg!(&format!("{:.precision$}", candle.close), val_color) + 10.0;
     }
 
+    // Vol：标题用原色，数值用涨跌色
     if options.show_volume {
-        parts.push(format!("Vol: {:.0}", candle.volume));
+        x = draw_seg!("Vol ", options.text_color);
+        x = draw_seg!(&format!("{:.0}", candle.volume), val_color) + 10.0;
     }
 
+    // 涨跌幅：用对应涨跌色渲染
     if options.show_change {
         let change_pct = (candle.close - candle.open) / candle.open * 100.0;
         let sign = if change_pct >= 0.0 { "+" } else { "" };
@@ -212,46 +242,9 @@ pub fn render_tracking_tooltip(
         } else {
             options.border_color_bearish
         };
-
-        // Draw change separately with color
-        let main_text = parts.join("   ");
         let change_text = format!("({sign}{change_pct:.2}%)");
-
-        let font_id = FontId::proportional(options.font_size);
-        let text_y = bar_rect.center().y;
-
-        // Draw main text
-        let main_rect = painter.text(
-            Pos2::new(bar_rect.min.x + 10.0, text_y),
-            egui::Align2::LEFT_CENTER,
-            &main_text,
-            font_id.clone(),
-            options.text_color,
-        );
-
-        // Draw change text with color
-        painter.text(
-            Pos2::new(main_rect.max.x + 15.0, text_y),
-            egui::Align2::LEFT_CENTER,
-            &change_text,
-            font_id,
-            change_color,
-        );
-
-        return;
+        draw_seg!(&change_text, change_color);
     }
-
-    // If no change display, just show combined text
-    let text = parts.join("   ");
-    let font_id = FontId::proportional(options.font_size);
-
-    painter.text(
-        Pos2::new(bar_rect.min.x + 10.0, bar_rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        &text,
-        font_id,
-        options.text_color,
-    );
 }
 
 /// Renders magnifier tooltip as circular zoom lens
