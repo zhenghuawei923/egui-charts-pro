@@ -25,23 +25,19 @@ pub fn render_crosshair_full(
 
     let label_bg = DESIGN_TOKENS.semantic.extended.chart_crosshair_label_bg;
 
-    // Convert x to a global index
-    let bars_from_right = (context.rect.max.x - hover_pos.x) / coords.bar_spacing - 0.5;
-    let t_float = coords.base_idx as f32 - (bars_from_right - coords.right_offset);
-    let t_idx = t_float.floor() as isize;
-    let first = coords.start_idx as isize;
-    let last = (coords.start_idx + visible_data.len().saturating_sub(1)) as isize;
-
-    // Determine actual hover position based on mode
-    let (actual_hover_x, actual_hover_y) = if t_idx >= first && t_idx <= last {
-        let candle_idx = (t_idx as usize).saturating_sub(coords.start_idx);
+    // Claude Opus 4.8 AI，修复于 2026 年 07 月 07 日。逻辑：
+    // 原代码同样使用手动公式计算 bar index（缺少 -1.0 + 用 floor），
+    // 导致悬停在 bar 41 中心时 t_idx = 40，Magnet 模式吸附到错误的 bar 40，
+    // 改用 local_idx_at_x 确保悬停在哪根 bar 就吸附到哪根 bar
+    let (actual_hover_x, actual_hover_y) = if let Some(candle_idx) = coords.local_idx_at_x(hover_pos.x, visible_data.len()) {
         let candle = &visible_data[candle_idx];
+        let global_idx = coords.start_idx + candle_idx;
 
         match mode {
             CrosshairMode::Normal => (hover_pos.x, hover_pos.y),
             CrosshairMode::Magnet => {
                 // Snap to nearest candle X position using ChartCoords helper
-                let candle_x = coords.idx_to_x(t_idx as usize);
+                let candle_x = coords.idx_to_x(global_idx);
 
                 // Snap to nearest OHLC price
                 let snap_price =
@@ -187,14 +183,12 @@ pub fn render_crosshair_full(
         DESIGN_TOKENS.semantic.extended.chart_text_muted,
     );
 
-    // Convert x to a global index using right-anchored mapping
-    let bars_from_right = (context.rect.max.x - hover_pos.x) / coords.bar_spacing - 0.5;
-    let t_float = coords.base_idx as f32 - (bars_from_right - coords.right_offset);
-    let t_idx = t_float.floor() as isize;
-    let first = coords.start_idx as isize;
-    let last = (coords.start_idx + visible_data.len().saturating_sub(1)) as isize;
-    if t_idx >= first && t_idx <= last {
-        let candle_idx = (t_idx as usize).saturating_sub(coords.start_idx);
+    // Claude Opus 4.8 AI，修复于 2026 年 07 月 07 日。逻辑：
+    // 原代码手动计算 bar index 时缺少 idx_to_x 公式中的 -1.0 偏移，且用 floor 而非 round，
+    // 导致悬停在 bar 中心时 t_float = idx - 1/bar_spacing（如 40.98），floor 后错误地显示前一根 bar 的时间；
+    // 改用 ChartMapping::local_idx_at_x，它正确实现了 x_to_idx 的逆运算（含 -1.0 + round），
+    // 确保悬停在 bar 41 中心时显示 bar 41 的时间，而非 bar 40
+    if let Some(candle_idx) = coords.local_idx_at_x(hover_pos.x, visible_data.len()) {
         let candle = &visible_data[candle_idx];
 
         // Detect timeframe based on bar duration to choose appropriate format

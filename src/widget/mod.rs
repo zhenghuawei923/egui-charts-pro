@@ -234,6 +234,13 @@ pub struct Chart {
     /// 渲染后缓存：可见区间左右端的 (ts_ms, x) 对，用于线性插值任意时间戳的 x 坐标
     /// 格式：(left_ts_ms, right_ts_ms, left_x, right_x)；None = 图表尚未渲染
     pub(crate) last_rendered_ts_x_range: Option<(i64, i64, f32, f32)>,
+    // Claude Opus 4.8 AI，新增于 2026 年 07 月 07 日。逻辑：
+    // 替代 last_rendered_ts_x_range 的精确版本：缓存每根可见K线的 (ts_ms, center_x)，
+    // 供 get_rendered_bar_x_at_ts 做二分查找，彻底消除 K 线存在交易间隙（午休/收盘/周末）
+    // 时挂钟时间线性插值导致 B/S 徽章偏移到错误 K 线的问题
+    /// 渲染后缓存：每根可见K线的 (ts_ms, center_x)，按 ts_ms 升序排列
+    /// None = 图表尚未渲染
+    pub(crate) last_rendered_bar_ts_x: Option<Vec<(i64, f32)>>,
     // =========================================================================
     // Multi-Chart Sync State
     // =========================================================================
@@ -1237,6 +1244,17 @@ impl Chart {
                     left_x,
                     right_x,
                 ));
+                // Claude Opus 4.8 AI，新增于 2026 年 07 月 07 日。逻辑：
+                // 缓存每根可见K线的精确 (ts_ms, center_x) 映射，替代线性时间插值；
+                // K 线图跳过交易间隙（午休/收盘/周末），挂钟时间插值会将间隙段的时间
+                // 分配到相邻 bar 的位置上，导致 B/S 徽章偏移到错误的 K 线；
+                // 精确映射通过 idx_to_x 逐根计算，与图表实际布局完全一致
+                self.last_rendered_bar_ts_x = Some(
+                    visible_data.iter().enumerate().map(|(i, bar)| {
+                        let x = coords.idx_to_x(start_idx + i);
+                        (bar.time.timestamp_millis(), x)
+                    }).collect()
+                );
             }
         }
         let colors = StyleColors {

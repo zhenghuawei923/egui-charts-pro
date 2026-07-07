@@ -101,6 +101,7 @@ impl Chart {
             last_rendered_indicator_panes: Vec::new(),
             last_rendered_latest_bar_x: 0.0,
             last_rendered_ts_x_range: None,
+            last_rendered_bar_ts_x: None,
             // Multi-chart sync
             synced_crosshair_bar_idx: None,
             last_hover_bar_idx: None,
@@ -173,6 +174,7 @@ impl Chart {
             last_rendered_indicator_panes: Vec::new(),
             last_rendered_latest_bar_x: 0.0,
             last_rendered_ts_x_range: None,
+            last_rendered_bar_ts_x: None,
             // Multi-chart sync
             synced_crosshair_bar_idx: None,
             last_hover_bar_idx: None,
@@ -550,16 +552,22 @@ impl Chart {
     // Claude Opus 4.8 AI，新增于 2026 年 07 月 02 日。逻辑：
     // 将任意 ts_ms 时间戳线性插值为屏幕 x 坐标，
     // 供已成交订单计算成交K线的 x 位置，使横线左端顶到成交K线。
-    /// 将毫秒时间戳线性插值为屏幕 x 坐标。
-    /// ts_ms：毫秒级 Unix 时间戳（与 CandleBar.ts_ms 对齐）。
-    /// 返回 None：时间戳在可见区间之外，或图表尚未渲染。
+    // Claude Opus 4.8 AI，更新于 2026 年 07 月 07 日。逻辑：
+    // 原实现用挂钟时间线性插值，但K线图跳过交易间隙（午休/收盘/周末），
+    // 插值误差在有间隙的时区（港股/美股）会导致 B/S 徽章偏移数根K线；
+    // 改为对 last_rendered_bar_ts_x（每根可见K线的精确坐标映射）做二分查找，
+    // 仅命中真实存在的K线时间戳时返回坐标，完全消除插值偏差
+    /// 将毫秒时间戳精确映射为屏幕 x 坐标（二分查找，无插值）。
+    ///
+    /// - `ts_ms`：毫秒级时间戳（与 CandleBar.ts_ms 对齐的"假UTC"时间）
+    /// - 返回 `None`：时间戳不在可见K线中，或图表尚未渲染
     pub fn get_rendered_bar_x_at_ts(&self, ts_ms: i64) -> Option<f32> {
-        let (left_ts, right_ts, left_x, right_x) = self.last_rendered_ts_x_range?;
-        if ts_ms < left_ts || ts_ms > right_ts {
-            return None;
+        let bars = self.last_rendered_bar_ts_x.as_ref()?;
+        // 对 (ts_ms, x) 的有序 vec 做二分查找，精确匹配 K 线起始时间戳
+        match bars.binary_search_by_key(&ts_ms, |&(ts, _)| ts) {
+            Ok(idx)  => Some(bars[idx].1),
+            // 未找到：时间戳不对应任何可见K线（已滚出视口或根本不存在）
+            Err(_)   => None,
         }
-        let span = (right_ts - left_ts).max(1) as f32;
-        let ratio = (ts_ms - left_ts) as f32 / span;
-        Some(left_x + ratio * (right_x - left_x))
     }
 }
