@@ -12,6 +12,9 @@ use crate::tokens::DESIGN_TOKENS;
 use egui::{Color32, FontId, Painter, Pos2, Rect, Stroke, Vec2, epaint::StrokeKind};
 
 /// Renders tooltip based on configured mode
+///
+/// `prev_close`：悬停K线前一根K线的收盘价，用于计算真实涨跌幅（相对前收），
+/// 传 None 时降级为以当根开盘价作基准
 pub fn render_tooltip_with_options(
     context: &RenderContext,
     hover_pos: Pos2,
@@ -20,13 +23,16 @@ pub fn render_tooltip_with_options(
     price_scale: &LinearPriceMap,
     coords: &ChartMapping,
     visible_data: &[Bar],
+    // Claude Opus 4.8 AI，新增于 2026 年 07 月 08 日。逻辑：
+    // 传入前一根K线收盘价，使悬停K线的涨跌幅以前收为基准，与第一行（最新K线）计算口径一致
+    prev_close: Option<f64>,
 ) {
     match options.mode {
         TooltipMode::Floating => {
             render_floating_tooltip(context.painter, hover_pos, context.rect, candle, options);
         }
         TooltipMode::Tracking => {
-            render_tracking_tooltip(context.painter, context.rect, candle, options);
+            render_tracking_tooltip(context.painter, context.rect, candle, options, prev_close);
         }
         TooltipMode::Magnifier => {
             render_magnifier_tooltip(
@@ -161,13 +167,20 @@ pub fn render_floating_tooltip(
 }
 
 /// Renders tracking tooltip as horizontal bar at top of chart
-/// Shows: yy-MM-dd HH:mm  O xxx  H xxx  L xxx  C xxx  Vol xxx  (+x.xx%)
+/// Shows: yy-MM-dd HH:mm  O xxx  H xxx  L xxx  C xxx  Vol xxx  +xx.xx(+x.xx%)
 /// 标题字母（O/H/L/C/Vol）保持原色；数值和涨跌幅根据涨跌着色（涨红跌绿）
+///
+/// `prev_close`：前一根K线收盘价，用于计算基于前收的涨跌额和涨跌幅，
+/// 传 None 时降级为以当根开盘价作基准
+// Claude Opus 4.8 AI，修改于 2026 年 07 月 08 日。逻辑：
+// 新增 prev_close 参数，使涨跌幅口径与第一行（render_legend）一致（相对前收），
+// 同时补充涨跌额绝对值显示（格式：+x.xx(+x.xx%)）
 pub fn render_tracking_tooltip(
     painter: &Painter,
     chart_rect: Rect,
     candle: &Bar,
     options: &TooltipOptions,
+    prev_close: Option<f64>,
 ) {
     let bar_height = options.tracking_bar_height;
     let bar_rect = Rect::from_min_size(chart_rect.min, Vec2::new(chart_rect.width(), bar_height));
@@ -233,16 +246,28 @@ pub fn render_tracking_tooltip(
         x = draw_seg!(&format!("{:.0}", candle.volume), val_color) + 10.0;
     }
 
-    // 涨跌幅：用对应涨跌色渲染
+    // 涨跌额 + 涨跌幅：以前一根K线收盘价（prev_close）为基准，与第一行口径一致；
+    // prev_close 未传入时降级为当根开盘价
+    // Claude Opus 4.8 AI，修改于 2026 年 07 月 08 日。逻辑：
+    // 原先用 (close - open) / open，与第一行（relative to prev_close）口径不同导致数值差异，
+    // 且缺少绝对涨跌额，现统一改为相对前收计算，并补充涨跌额
     if options.show_change {
-        let change_pct = (candle.close - candle.open) / candle.open * 100.0;
-        let sign = if change_pct >= 0.0 { "+" } else { "" };
-        let change_color = if change_pct >= 0.0 {
+        let reference = prev_close.unwrap_or(candle.open);
+        let change = candle.close - reference;
+        let change_pct = if reference != 0.0 {
+            (change / reference) * 100.0
+        } else {
+            0.0
+        };
+        let sign = if change >= 0.0 { "+" } else { "" };
+        let change_color = if change >= 0.0 {
             options.border_color_bullish
         } else {
             options.border_color_bearish
         };
-        let change_text = format!("({sign}{change_pct:.2}%)");
+        // 格式：+x.xx(+x.xx%) 与第一行 render_legend 保持一致
+        let precision = options.price_precision.min(4);
+        let change_text = format!("{sign}{change:.precision$}({sign}{change_pct:.2}%)");
         draw_seg!(&change_text, change_color);
     }
 }

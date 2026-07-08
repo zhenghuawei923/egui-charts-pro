@@ -439,16 +439,17 @@ fn render_order_line(ui: &mut Ui, chart_rect: Rect, y: f32, line: &OrderLine) ->
     // 横线不再无限向左延伸：未成交时左端顶到最新K线，成交时顶到成交K线。
     // line_left_x 由调用方（candle_chart.rs）传入对应K线的屏幕 x 坐标；
     // None 时退回原行为（从图表左边界起画），保持向后兼容。
-    // Claude Opus 4.8 AI，更新于 2026 年 07 月 07 日。逻辑：
-    // 原先为标签预留 100px，但标签框宽 140px + 8px 偏移 = 共需 148px，导致虚线与标签框重叠 48px，
-    // 标签盖住了价格横线本身；改为预留 160px，留出 ~12px 间隔，避免视觉遮挡
+    // Claude Opus 4.8 AI，更新于 2026 年 07 月 08 日。逻辑：
+    // 横线终止位置必须与标签左边缘对齐，label_rect 左边缘 = chart_rect.right() - label_width
+    // - spacing.lg - 40.0，因此 label_reserve 的固定偏移也必须为 40.0（+2px 视觉间隙）；
+    // 原先写 100.0 导致横线比标签早停 60px，出现明显空隙
     // Draw dashed line across chart，从 line_left_x（或图表左边界）起
     let dash_length = 6.0;
     let gap_length = 4.0;
-    // 标签框宽 label_width(140) + spacing.lg(8) = 148px，额外留 12px 间距，共 160px
+    // 与 label_rect 左边缘偏移一致（40.0），额外留 2px 视觉间隙，使横线与标签紧密相接
     let label_reserve = DESIGN_TOKENS.sizing.charts_ext.order_line_label_width
         + DESIGN_TOKENS.spacing.lg
-        + 100.0;
+        + 42.0;
     let mut x = line.line_left_x.unwrap_or(chart_rect.left());
 
     while x < chart_rect.right() - label_reserve {

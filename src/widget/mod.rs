@@ -1642,6 +1642,14 @@ impl Chart {
                 && let Some(local_idx) = coords.local_idx_at_x(hover_pos.x, visible_data.len())
             {
                 let candle = &visible_data[local_idx];
+                // Claude Opus 4.8 AI，新增于 2026 年 07 月 08 日。逻辑：
+                // 悬停K线的前一根收盘价，用于第二行涨跌幅以前收为基准（与第一行口径一致）；
+                // local_idx == 0 时（最旧的可见K线）无前一根，传 None 降级为以当根开盘为基准
+                let hover_prev_close: Option<f64> = if local_idx > 0 {
+                    Some(visible_data[local_idx - 1].close)
+                } else {
+                    None
+                };
                 rendering::render_tooltip_with_options(
                     &price_ctx,
                     hover_pos,
@@ -1650,6 +1658,7 @@ impl Chart {
                     &price_scale,
                     &coords,
                     visible_data,
+                    hover_prev_close,
                 );
             }
         } else {

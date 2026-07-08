@@ -380,7 +380,18 @@ pub fn render_legend(
     x += c_label.rect.width();
     let c_val = painter.layout_no_wrap(format_price(candle.close), val_font.clone(), val_color);
     painter.galley(Pos2::new(x, y), c_val.clone(), val_color);
-    x += c_val.rect.width() + 16.0;
+    x += c_val.rect.width() + 12.0;
+
+    // Vol（成交量）：与第二行（render_tracking_tooltip）保持字段一致
+    // Claude Opus 4.8 AI，新增于 2026 年 07 月 08 日。逻辑：
+    // 第一行原先漏掉了 Vol 字段，补充显示以与第二行对齐
+    let vol_label = painter.layout_no_wrap("Vol ".to_string(), label_font.clone(), label_color);
+    painter.galley(Pos2::new(x, y), vol_label.clone(), label_color);
+    x += vol_label.rect.width();
+    let vol_str = format!("{:.0}", candle.volume);
+    let vol_val = painter.layout_no_wrap(vol_str, val_font.clone(), val_color);
+    painter.galley(Pos2::new(x, y), vol_val.clone(), val_color);
+    x += vol_val.rect.width() + 16.0;
 
     // Change amount and percentage (if we have previous close)
     let reference_price = prev_close.unwrap_or(candle.open);
